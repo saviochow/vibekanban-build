@@ -29,15 +29,26 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
       sha: ${{ steps.check.outputs.sha }}
     steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check for upstream changes
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           REF="${{ github.event.inputs.vibekanban_ref || 'main' }}"
           FORCE="${{ github.event.inputs.force || 'false' }}"
 
@@ -59,14 +70,13 @@ jobs:
             exit 0
           fi
 
-          # Check if an image with this SHA already exists
-          if gh api "user/packages/container/vibekanban-app/versions" \
-               --jq ".[] | select(.metadata.container.tags[] | contains(\"$SHORT_SHA\")) | .id" \
-               2>/dev/null | grep -q .; then
-            echo "Image for $SHORT_SHA already exists — skipping build"
+          # Check if an image with this SHA already exists using docker manifest
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-app:$SHORT_SHA"
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "Image $IMAGE already exists — skipping build"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
-            echo "No image for $SHORT_SHA — will build"
+            echo "No image $IMAGE found — will build"
             echo "should_build=true" >> $GITHUB_OUTPUT
           fi
 
