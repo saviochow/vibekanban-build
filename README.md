@@ -2,9 +2,16 @@
 
 Builds and publishes [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) Docker images to GHCR, ready to deploy as a Portainer stack.
 
+> [!WARNING]
+> **The images published by this repo are built for my personal deployment and will not work for you as-is.**
+>
+> The frontend has a build-time argument (`VITE_RELAY_API_BASE_URL`) that is compiled into the JS bundle. My images point at `https://vk-relay.gabrielbelli.com` — useless for anyone else.
+>
+> **If you want to use this: fork the repo, change the URL, and build your own images.** Instructions below.
+
 ## Why this exists
 
-Vibe Kanban's frontend has one build-time argument (`VITE_RELAY_API_BASE_URL`) that gets compiled into the JS bundle. This means images are deployment-specific — there's no generic image you can pull. This repo automates the build for your own domain.
+Vibe Kanban's frontend has one build-time argument (`VITE_RELAY_API_BASE_URL`) that gets compiled into the JS bundle. This means images are deployment-specific — there's no generic image anyone can pull. This repo automates the build so each user can produce their own images with their own domain baked in.
 
 ## Fork it
 
