@@ -1,0 +1,81 @@
+services:
+  db:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "wal_level=logical"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: remote
+      POSTGRES_USER: remote
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remote"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  electric:
+    image: electricsql/electric:1.4.13
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://electric_sync:${ELECTRIC_ROLE_PASSWORD}@db:5432/remote?sslmode=disable
+      PG_PROXY_PORT: 65432
+      LOGICAL_PUBLISHER_HOST: electric
+      AUTH_MODE: insecure
+      ELECTRIC_INSECURE: true
+      ELECTRIC_MANUAL_TABLE_PUBLISHING: true
+      ELECTRIC_USAGE_REPORTING: false
+      ELECTRIC_FEATURE_FLAGS: allow_subqueries,tagged_subqueries
+    volumes:
+      - electric-data:/app/persistent
+    depends_on:
+      db: { condition: service_healthy }
+      app: { condition: service_healthy }
+
+  relay:
+    image: ghcr.io/gabrielbelli/vibekanban-relay:latest
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      RUST_LOG: info
+      SERVER_DATABASE_URL: postgres://remote:${DB_PASSWORD}@db:5432/remote
+      RELAY_LISTEN_ADDR: 0.0.0.0:8082
+      VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET}
+
+  app:
+    image: ghcr.io/gabrielbelli/vibekanban-app:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      RUST_LOG: info,remote=info
+      SERVER_DATABASE_URL: postgres://remote:${DB_PASSWORD}@db:5432/remote
+      SERVER_LISTEN_ADDR: 0.0.0.0:8081
+      ELECTRIC_URL: http://electric:3000
+      ELECTRIC_ROLE_PASSWORD: ${ELECTRIC_ROLE_PASSWORD}
+      SERVER_PUBLIC_BASE_URL: ${APP_URL}
+      VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET}
+      # Auth — GitHub OAuth
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      # Auth — GitHub App (issues/webhooks/PR integration)
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/v1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  db-data:
+  electric-data:
