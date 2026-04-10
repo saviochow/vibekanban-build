@@ -94,8 +94,22 @@ jobs:
 
       - name: Load build config
         run: |
+          # Load defaults from build.env
           if [ -f build.env ]; then
             grep -v '^#' build.env | grep -v '^$' >> $GITHUB_ENV
+          fi
+          # Repo variables override build.env (set in Settings → Secrets and variables → Actions → Variables)
+          if [ -n "${{ vars.VITE_RELAY_API_BASE_URL }}" ]; then
+            echo "VITE_RELAY_API_BASE_URL=${{ vars.VITE_RELAY_API_BASE_URL }}" >> $GITHUB_ENV
+          fi
+          if [ -n "${{ vars.SENTRY_DSN_REMOTE }}" ]; then
+            echo "SENTRY_DSN_REMOTE=${{ vars.SENTRY_DSN_REMOTE }}" >> $GITHUB_ENV
+          fi
+          if [ -n "${{ vars.POSTHOG_API_KEY }}" ]; then
+            echo "POSTHOG_API_KEY=${{ vars.POSTHOG_API_KEY }}" >> $GITHUB_ENV
+          fi
+          if [ -n "${{ vars.POSTHOG_API_ENDPOINT }}" ]; then
+            echo "POSTHOG_API_ENDPOINT=${{ vars.POSTHOG_API_ENDPOINT }}" >> $GITHUB_ENV
           fi
 
       - name: Clone vibekanban source
