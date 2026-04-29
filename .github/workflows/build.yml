@@ -33,7 +33,6 @@ jobs:
       contents: read
       packages: read
     outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
       sha: ${{ steps.check.outputs.sha }}
       ref: ${{ steps.check.outputs.ref }}
       version: ${{ steps.check.outputs.version }}
@@ -41,20 +40,12 @@ jobs:
       - name: Checkout build repo
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve ref and check for upstream changes
+      - name: Resolve ref and check upstream commit
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          FORCE="${{ github.event.inputs.force || 'false' }}"
 
           # Priority: workflow input > build.env > "main"
           INPUT_REF="${{ github.event.inputs.vibekanban_ref }}"
@@ -64,44 +55,29 @@ jobs:
             REF=$(grep '^VIBEKANBAN_REF=' build.env | cut -d= -f2-)
           fi
           REF="${REF:-main}"
-          echo "ref=$REF" >> $GITHUB_OUTPUT
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Resolved ref: $REF"
 
           # Extract version from ref (e.g. v0.1.43-20260417125614 → v0.1.43)
-          VERSION=$(echo "$REF" | grep -oE '^v[0-9]+\.[0-9]+\.[0-9]+' || echo "")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$REF" | grep -oE '^v[0-9]+\.[0-9]+\.[0-9]+' || true)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           # Get latest upstream SHA
-          FULL_SHA=$(gh api repos/${{ env.VIBEKANBAN_REPO }}/commits/$REF --jq '.sha')
+          FULL_SHA=$(gh api "repos/${{ env.VIBEKANBAN_REPO }}/commits/$REF" --jq '.sha')
           SHORT_SHA=${FULL_SHA:0:7}
-          echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
           echo "Upstream $REF is at $SHORT_SHA"
-
-          if [ "$FORCE" = "true" ]; then
-            echo "Force rebuild requested"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "Push to main — always rebuild"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Check if an image with this SHA already exists
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-app:$SHORT_SHA"
-          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
-            echo "Image $IMAGE already exists — skipping build"
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "No image $IMAGE found — will build"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
 
   build:
     needs: check
-    if: needs.check.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -115,20 +91,20 @@ jobs:
         run: |
           # Load defaults from build.env
           if [ -f build.env ]; then
-            grep -v '^#' build.env | grep -v '^$' >> $GITHUB_ENV
+            grep -v '^#' build.env | grep -v '^$' >> "$GITHUB_ENV"
           fi
           # Repo variables override build.env (set in Settings → Secrets and variables → Actions → Variables)
           if [ -n "${{ vars.VITE_RELAY_API_BASE_URL }}" ]; then
-            echo "VITE_RELAY_API_BASE_URL=${{ vars.VITE_RELAY_API_BASE_URL }}" >> $GITHUB_ENV
+            echo "VITE_RELAY_API_BASE_URL=${{ vars.VITE_RELAY_API_BASE_URL }}" >> "$GITHUB_ENV"
           fi
           if [ -n "${{ vars.SENTRY_DSN_REMOTE }}" ]; then
-            echo "SENTRY_DSN_REMOTE=${{ vars.SENTRY_DSN_REMOTE }}" >> $GITHUB_ENV
+            echo "SENTRY_DSN_REMOTE=${{ vars.SENTRY_DSN_REMOTE }}" >> "$GITHUB_ENV"
           fi
           if [ -n "${{ vars.POSTHOG_API_KEY }}" ]; then
-            echo "POSTHOG_API_KEY=${{ vars.POSTHOG_API_KEY }}" >> $GITHUB_ENV
+            echo "POSTHOG_API_KEY=${{ vars.POSTHOG_API_KEY }}" >> "$GITHUB_ENV"
           fi
           if [ -n "${{ vars.POSTHOG_API_ENDPOINT }}" ]; then
-            echo "POSTHOG_API_ENDPOINT=${{ vars.POSTHOG_API_ENDPOINT }}" >> $GITHUB_ENV
+            echo "POSTHOG_API_ENDPOINT=${{ vars.POSTHOG_API_ENDPOINT }}" >> "$GITHUB_ENV"
           fi
 
       - name: Clone vibekanban source
@@ -139,32 +115,7 @@ jobs:
           if [ "$REF" != "main" ]; then
             git -C vibekanban checkout "$REF" || true
           fi
-          echo "VIBEKANBAN_SHA=${{ needs.check.outputs.sha }}" >> $GITHUB_ENV
-
-      - name: Compute image tags
-        id: tags
-        run: |
-          SHA="${{ needs.check.outputs.sha }}"
-          VERSION="${{ needs.check.outputs.version }}"
-
-          # Always tag with :latest and :<sha>
-          RELAY_TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-relay:latest"
-          RELAY_TAGS="$RELAY_TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-relay:$SHA"
-          APP_TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-app:latest"
-          APP_TAGS="$APP_TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-app:$SHA"
-
-          # Add version tag if building from a versioned ref (e.g. v0.1.43)
-          if [ -n "$VERSION" ]; then
-            RELAY_TAGS="$RELAY_TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-relay:$VERSION"
-            APP_TAGS="$APP_TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/vibekanban-app:$VERSION"
-          fi
-
-          echo "relay_tags=$RELAY_TAGS" >> $GITHUB_OUTPUT
-          echo "app_tags=$APP_TAGS" >> $GITHUB_OUTPUT
-          echo "Tags: relay=$RELAY_TAGS app=$APP_TAGS"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          echo "VIBEKANBAN_SHA=${{ needs.check.outputs.sha }}" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -173,27 +124,89 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Skip build if this arch already exists
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          FORCE="${{ github.event.inputs.force || 'false' }}"
+          SHA="${{ needs.check.outputs.sha }}"
+          VERSION="${{ needs.check.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          BASE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}"
+
+          APP_SHA_IMAGE="$BASE/vibekanban-app:$SHA-$ARCH"
+          RELAY_SHA_IMAGE="$BASE/vibekanban-relay:$SHA-$ARCH"
+
+          if [ "${{ github.event_name }}" != "push" ] && [ "$FORCE" != "true" ]; then
+            if docker manifest inspect "$APP_SHA_IMAGE" >/dev/null 2>&1 && \
+               docker manifest inspect "$RELAY_SHA_IMAGE" >/dev/null 2>&1; then
+              echo "skip_build=true" >> "$GITHUB_OUTPUT"
+              echo "Images already exist for $ARCH; skipping."
+              exit 0
+            fi
+          fi
+
+          echo "skip_build=false" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        if: steps.exists.outputs.skip_build != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.exists.outputs.skip_build != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        if: steps.exists.outputs.skip_build != 'true'
+        id: tags
+        run: |
+          SHA="${{ needs.check.outputs.sha }}"
+          VERSION="${{ needs.check.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}"
+
+          RELAY_TAGS="$PREFIX/vibekanban-relay:latest-$ARCH"
+          RELAY_TAGS="$RELAY_TAGS,$PREFIX/vibekanban-relay:$SHA-$ARCH"
+          APP_TAGS="$PREFIX/vibekanban-app:latest-$ARCH"
+          APP_TAGS="$APP_TAGS,$PREFIX/vibekanban-app:$SHA-$ARCH"
+
+          if [ -n "$VERSION" ]; then
+            RELAY_TAGS="$RELAY_TAGS,$PREFIX/vibekanban-relay:$VERSION-$ARCH"
+            APP_TAGS="$APP_TAGS,$PREFIX/vibekanban-app:$VERSION-$ARCH"
+          fi
+
+          echo "relay_tags=$RELAY_TAGS" >> "$GITHUB_OUTPUT"
+          echo "app_tags=$APP_TAGS" >> "$GITHUB_OUTPUT"
+          echo "Tags: relay=$RELAY_TAGS app=$APP_TAGS"
+
       - name: Build and push relay image
+        if: steps.exists.outputs.skip_build != 'true'
         uses: docker/build-push-action@v5
         with:
           context: vibekanban
           file: vibekanban/crates/relay-tunnel/Dockerfile
           push: true
+          platforms: ${{ matrix.platform }}
           tags: ${{ steps.tags.outputs.relay_tags }}
-          cache-from: type=gha,scope=relay
-          cache-to: type=gha,scope=relay,mode=max
+          cache-from: type=gha,scope=relay-${{ matrix.arch }}
+          cache-to: type=gha,scope=relay-${{ matrix.arch }},mode=max
 
       - name: Build and push app image
+        if: steps.exists.outputs.skip_build != 'true'
         uses: docker/build-push-action@v5
         with:
           context: vibekanban
           file: vibekanban/crates/remote/Dockerfile
           push: true
+          platforms: ${{ matrix.platform }}
           build-args: |
             VITE_RELAY_API_BASE_URL=${{ env.VITE_RELAY_API_BASE_URL }}
             SENTRY_DSN_REMOTE=${{ env.SENTRY_DSN_REMOTE }}
             POSTHOG_API_KEY=${{ env.POSTHOG_API_KEY }}
             POSTHOG_API_ENDPOINT=${{ env.POSTHOG_API_ENDPOINT }}
           tags: ${{ steps.tags.outputs.app_tags }}
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,scope=app,mode=max
+          cache-from: type=gha,scope=app-${{ matrix.arch }}
+          cache-to: type=gha,scope=app-${{ matrix.arch }},mode=max
