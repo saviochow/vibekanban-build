@@ -48,6 +48,8 @@ services:
       SERVER_DATABASE_URL: postgres://remote:${DB_PASSWORD}@db:5432/remote
       RELAY_LISTEN_ADDR: 0.0.0.0:8082
       VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET}
+    ports:
+      - "8082:8082"
 
   app:
     image: ghcr.io/saviochow/vibekanban-app:${IMAGE_TAG:-latest}-${IMAGE_ARCH:-arm64}
@@ -75,6 +77,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    ports:
+      - "8081:8081"
 
   cert-init:
     image: alpine:latest
