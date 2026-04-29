@@ -36,7 +36,7 @@ services:
         condition: service_healthy
 
   relay:
-    image: ghcr.io/gabrielbelli/vibekanban-relay:${IMAGE_TAG:-latest}
+    image: ghcr.io/saviochow/vibekanban-relay:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       db:
@@ -48,7 +48,7 @@ services:
       VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET}
 
   app:
-    image: ghcr.io/gabrielbelli/vibekanban-app:${IMAGE_TAG:-latest}
+    image: ghcr.io/saviochow/vibekanban-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       db:
