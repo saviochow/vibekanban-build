@@ -110,11 +110,8 @@ jobs:
       - name: Clone vibekanban source
         run: |
           REF="${{ needs.check.outputs.ref }}"
-          git clone --depth 1 --branch "$REF" https://github.com/${{ env.VIBEKANBAN_REPO }}.git vibekanban || \
-            git clone https://github.com/${{ env.VIBEKANBAN_REPO }}.git vibekanban
-          if [ "$REF" != "main" ]; then
-            git -C vibekanban checkout "$REF" || true
-          fi
+          git clone https://github.com/${{ env.VIBEKANBAN_REPO }}.git vibekanban
+          git -C vibekanban checkout "$REF"
           echo "VIBEKANBAN_SHA=${{ needs.check.outputs.sha }}" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
