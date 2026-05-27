@@ -24,7 +24,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_OWNER: ${{ github.repository_owner }}
-  VIBEKANBAN_REPO: BloopAI/vibe-kanban
+  VIBEKANBAN_REPO: xuzhiping7/ai-kanban
 
 jobs:
   check:
